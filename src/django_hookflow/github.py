@@ -22,7 +22,11 @@ def dispatch_workflow(repo, workflow_file, ref="main"):
     payload = {"ref": ref}
 
     response = requests.post(url, json=payload, headers=headers)
-    if response.status_code != 204:
+    if response.status_code == 404:
+        raise ValueError(
+            f"Resource not found: The repository '{repo}' or workflow file '{workflow_file}' does not exist"
+        )
+    elif response.status_code != 204:
         raise Exception(
             f"Failed to trigger workflow: {response.status_code}, {response.text}"
         )
