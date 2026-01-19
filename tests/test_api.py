@@ -41,9 +41,11 @@ class TestWorkflowStatusAPI(unittest.TestCase):
         mock_run.completed_at = datetime(
             2024, 1, 1, 12, 1, 0, tzinfo=timezone.utc
         )
-        mock_run.steps.all.return_value.order_by.return_value = []
+        mock_run.step_executions.all.return_value.order_by.return_value = []
 
-        mock_model.objects.get.return_value = mock_run
+        mock_queryset = MagicMock()
+        mock_queryset.get.return_value = mock_run
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/test-run-123/")
         response = workflow_status(request, "test-run-123")
@@ -63,7 +65,9 @@ class TestWorkflowStatusAPI(unittest.TestCase):
         """Test that workflow_status returns 404 for unknown run_id."""
         # Create a proper exception class for the mock
         mock_model.DoesNotExist = type("DoesNotExist", (Exception,), {})
-        mock_model.objects.get.side_effect = mock_model.DoesNotExist()
+        mock_queryset = MagicMock()
+        mock_queryset.get.side_effect = mock_model.DoesNotExist()
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/unknown-run/")
         response = workflow_status(request, "unknown-run")
@@ -71,20 +75,14 @@ class TestWorkflowStatusAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         data = json.loads(response.content)
         self.assertEqual(data["error"], "Workflow run not found")
-        self.assertEqual(data["run_id"], "unknown-run")
 
     @patch("django_hookflow.api.views.WorkflowRun")
     def test_workflow_status_includes_steps(self, mock_model):
         """Test that workflow_status includes step information."""
         mock_step = MagicMock()
         mock_step.step_id = "step-1"
-        mock_step.status = "completed"
         mock_step.result = {"step_output": "data"}
-        mock_step.error_message = None
-        mock_step.started_at = datetime(
-            2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc
-        )
-        mock_step.completed_at = datetime(
+        mock_step.executed_at = datetime(
             2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc
         )
 
@@ -104,9 +102,13 @@ class TestWorkflowStatusAPI(unittest.TestCase):
         mock_run.completed_at = datetime(
             2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc
         )
-        mock_run.steps.all.return_value.order_by.return_value = [mock_step]
+        mock_run.step_executions.all.return_value.order_by.return_value = [
+            mock_step
+        ]
 
-        mock_model.objects.get.return_value = mock_run
+        mock_queryset = MagicMock()
+        mock_queryset.get.return_value = mock_run
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/test-run-123/")
         response = workflow_status(request, "test-run-123")
@@ -115,7 +117,7 @@ class TestWorkflowStatusAPI(unittest.TestCase):
         data = json.loads(response.content)
         self.assertEqual(len(data["steps"]), 1)
         self.assertEqual(data["steps"][0]["step_id"], "step-1")
-        self.assertEqual(data["steps"][0]["status"], "completed")
+        self.assertEqual(data["steps"][0]["result"], {"step_output": "data"})
 
 
 class TestWorkflowListAPI(unittest.TestCase):
@@ -139,7 +141,7 @@ class TestWorkflowListAPI(unittest.TestCase):
             2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc
         )
         mock_run.completed_at = None
-        mock_run.steps.all.return_value.order_by.return_value = []
+        mock_run.step_executions.all.return_value.order_by.return_value = []
 
         mock_queryset = MagicMock()
         mock_queryset.filter.return_value = mock_queryset
@@ -147,7 +149,7 @@ class TestWorkflowListAPI(unittest.TestCase):
         mock_queryset.order_by.return_value.__getitem__.return_value = [
             mock_run
         ]
-        mock_model.objects.all.return_value = mock_queryset
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/")
         response = workflow_list(request)
@@ -166,7 +168,7 @@ class TestWorkflowListAPI(unittest.TestCase):
         mock_queryset.filter.return_value = mock_queryset
         mock_queryset.count.return_value = 0
         mock_queryset.order_by.return_value.__getitem__.return_value = []
-        mock_model.objects.all.return_value = mock_queryset
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/?workflow_id=my-workflow")
         response = workflow_list(request)
@@ -181,7 +183,7 @@ class TestWorkflowListAPI(unittest.TestCase):
         mock_queryset.filter.return_value = mock_queryset
         mock_queryset.count.return_value = 0
         mock_queryset.order_by.return_value.__getitem__.return_value = []
-        mock_model.objects.all.return_value = mock_queryset
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/?status=running")
         response = workflow_list(request)
@@ -196,7 +198,7 @@ class TestWorkflowListAPI(unittest.TestCase):
         mock_queryset.filter.return_value = mock_queryset
         mock_queryset.count.return_value = 100
         mock_queryset.order_by.return_value.__getitem__.return_value = []
-        mock_model.objects.all.return_value = mock_queryset
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get("/api/workflows/?limit=10&offset=20")
         response = workflow_list(request)
@@ -214,7 +216,7 @@ class TestWorkflowListAPI(unittest.TestCase):
         mock_queryset.filter.return_value = mock_queryset
         mock_queryset.count.return_value = 0
         mock_queryset.order_by.return_value.__getitem__.return_value = []
-        mock_model.objects.all.return_value = mock_queryset
+        mock_model.objects.prefetch_related.return_value = mock_queryset
 
         request = self.factory.get(
             "/api/workflows/?limit=invalid&offset=invalid"
@@ -268,13 +270,8 @@ class TestSerializeWorkflowRun(unittest.TestCase):
         """Test serialization includes all fields correctly."""
         mock_step = MagicMock()
         mock_step.step_id = "step-1"
-        mock_step.status = "completed"
         mock_step.result = {"data": "value"}
-        mock_step.error_message = None
-        mock_step.started_at = datetime(
-            2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc
-        )
-        mock_step.completed_at = datetime(
+        mock_step.executed_at = datetime(
             2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc
         )
 
@@ -294,7 +291,9 @@ class TestSerializeWorkflowRun(unittest.TestCase):
         mock_run.completed_at = datetime(
             2024, 1, 1, 12, 1, 0, tzinfo=timezone.utc
         )
-        mock_run.steps.all.return_value.order_by.return_value = [mock_step]
+        mock_run.step_executions.all.return_value.order_by.return_value = [
+            mock_step
+        ]
 
         result = serialize_workflow_run(mock_run)
 
@@ -322,7 +321,7 @@ class TestSerializeWorkflowRun(unittest.TestCase):
         mock_run.created_at = None
         mock_run.updated_at = None
         mock_run.completed_at = None
-        mock_run.steps.all.return_value.order_by.return_value = []
+        mock_run.step_executions.all.return_value.order_by.return_value = []
 
         result = serialize_workflow_run(mock_run)
 
@@ -346,7 +345,7 @@ class TestSerializeWorkflowRun(unittest.TestCase):
             2024, 1, 1, 12, 0, 30, tzinfo=timezone.utc
         )
         mock_run.completed_at = None
-        mock_run.steps.all.return_value.order_by.return_value = []
+        mock_run.step_executions.all.return_value.order_by.return_value = []
 
         result = serialize_workflow_run(mock_run)
 

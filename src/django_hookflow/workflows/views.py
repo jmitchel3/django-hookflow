@@ -6,6 +6,7 @@ import traceback
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.http import HttpRequest
 from django.http import HttpResponse
 from django.http import JsonResponse
@@ -16,6 +17,7 @@ from django_hookflow.dlq import DeadLetterEntry
 from django_hookflow.exceptions import StepCompleted
 from django_hookflow.exceptions import WorkflowError
 from django_hookflow.retry import get_retry_delay
+from django_hookflow.retry import is_retryable_error
 from django_hookflow.retry import should_retry
 
 from .handlers import publish_next_step
@@ -35,6 +37,90 @@ def _get_persistence():
     from django_hookflow.persistence import WorkflowPersistence
 
     return WorkflowPersistence
+
+
+def _acquire_workflow_lock(run_id: str) -> bool:
+    """
+    Acquire a lock on the workflow run to prevent concurrent execution.
+
+    Uses select_for_update with nowait to prevent blocking.
+
+    Args:
+        run_id: The workflow run identifier
+
+    Returns:
+        True if lock acquired, False if already locked or not found
+    """
+    if not _is_persistence_enabled():
+        return True
+
+    from django_hookflow.models import WorkflowRun
+
+    try:
+        with transaction.atomic():
+            WorkflowRun.objects.select_for_update(nowait=True).get(
+                run_id=run_id
+            )
+            return True
+    except WorkflowRun.DoesNotExist:
+        return True
+    except Exception:
+        return False
+
+
+def _safe_persist_step(run_id: str, step_id: str, result: Any) -> None:
+    """
+    Safely persist step result, logging errors but not failing.
+
+    This ensures that persistence failures don't block workflow execution.
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        _get_persistence().save_step(run_id, step_id, result)
+    except Exception as e:
+        logger.warning(
+            "Failed to persist step (workflow will continue): "
+            "run_id=%s, step_id=%s, error=%s",
+            run_id,
+            step_id,
+            e,
+        )
+
+
+def _safe_persist_completion(run_id: str, result: Any) -> None:
+    """
+    Safely persist workflow completion, logging errors but not failing.
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        _get_persistence().mark_completed(run_id, result)
+    except Exception as e:
+        logger.warning(
+            "Failed to persist workflow completion: run_id=%s, error=%s",
+            run_id,
+            e,
+        )
+
+
+def _safe_persist_failure(run_id: str, error_message: str) -> None:
+    """
+    Safely persist workflow failure, logging errors but not failing.
+    """
+    if not _is_persistence_enabled():
+        return
+
+    try:
+        _get_persistence().mark_failed(run_id, error_message)
+    except Exception as e:
+        logger.warning(
+            "Failed to persist workflow failure: run_id=%s, error=%s",
+            run_id,
+            e,
+        )
 
 
 @csrf_exempt
@@ -57,10 +143,12 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
     # 1. Verify QStash signature
     try:
         verify_qstash_signature(request)
-    except WorkflowError as e:
-        logger.warning("QStash signature verification failed: %s", e)
+    except WorkflowError:
+        logger.warning(
+            "QStash signature verification failed for %s", workflow_id
+        )
         return JsonResponse(
-            {"error": "Signature verification failed", "detail": str(e)},
+            {"error": "Signature verification failed"},
             status=401,
         )
 
@@ -111,8 +199,20 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
     if workflow is None:
         logger.error("Workflow not found: %s", workflow_id)
         return JsonResponse(
-            {"error": f"Workflow '{workflow_id}' not found"},
+            {"error": "Workflow not found"},
             status=404,
+        )
+
+    # 4a. Try to acquire lock to prevent concurrent execution
+    if not _acquire_workflow_lock(run_id):
+        logger.warning(
+            "Could not acquire lock for workflow: workflow_id=%s, run_id=%s",
+            workflow_id,
+            run_id,
+        )
+        return JsonResponse(
+            {"error": "Workflow execution in progress"},
+            status=409,
         )
 
     # 5. Execute the workflow
@@ -130,9 +230,8 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             run_id,
         )
 
-        # Persist workflow completion
-        if _is_persistence_enabled():
-            _get_persistence().mark_completed(run_id, result)
+        # Persist workflow completion (non-blocking)
+        _safe_persist_completion(run_id, result)
 
         return JsonResponse(
             {
@@ -152,9 +251,8 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             e.step_id,
         )
 
-        # Persist step result
-        if _is_persistence_enabled():
-            _get_persistence().save_step(run_id, e.step_id, e.result)
+        # Persist step result (non-blocking)
+        _safe_persist_step(run_id, e.step_id, e.result)
 
         try:
             publish_next_step(
@@ -163,13 +261,10 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
                 data=data,
                 completed_steps=e.completed_steps,
             )
-        except WorkflowError as publish_err:
+        except WorkflowError:
             logger.exception("Failed to schedule next step")
             return JsonResponse(
-                {
-                    "error": "Failed to schedule next step",
-                    "detail": str(publish_err),
-                },
+                {"error": "Failed to schedule next step"},
                 status=500,
             )
 
@@ -194,8 +289,8 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
         # Extract current attempt from payload (default 0)
         attempt = payload.get("attempt", 0)
 
-        # Check if we should retry
-        if should_retry(attempt):
+        # Check if error is retryable and we should retry
+        if is_retryable_error(wf_err) and should_retry(attempt):
             # Schedule retry with exponential backoff
             retry_delay = get_retry_delay(attempt)
             logger.info(
@@ -222,7 +317,6 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
                         "run_id": run_id,
                         "attempt": attempt + 1,
                         "retry_delay": retry_delay,
-                        "error": str(wf_err),
                     }
                 )
             except WorkflowError:
@@ -245,16 +339,15 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             error_message=str(wf_err),
             error_traceback=error_tb,
             attempt_count=attempt + 1,
+            completed_steps=completed_steps,
         )
 
-        # Persist workflow failure
-        if _is_persistence_enabled():
-            _get_persistence().mark_failed(run_id, str(wf_err))
+        # Persist workflow failure (non-blocking)
+        _safe_persist_failure(run_id, str(wf_err))
 
         return JsonResponse(
             {
                 "error": "Workflow execution failed",
-                "detail": str(wf_err),
                 "workflow_id": workflow_id,
                 "run_id": run_id,
                 "added_to_dlq": True,
@@ -262,7 +355,7 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             status=500,
         )
 
-    except Exception as exc:
+    except Exception:
         # Unexpected error
         logger.exception(
             "Unexpected error in workflow: workflow_id=%s, run_id=%s",
@@ -270,9 +363,8 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             run_id,
         )
 
-        # Persist workflow failure
-        if _is_persistence_enabled():
-            _get_persistence().mark_failed(run_id, f"Unexpected error: {exc}")
+        # Persist workflow failure (non-blocking)
+        _safe_persist_failure(run_id, "Unexpected internal error")
 
         return JsonResponse(
             {

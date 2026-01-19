@@ -2,6 +2,57 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Exceptions that should NOT be retried (deterministic failures)
+NON_RETRYABLE_ERRORS = (
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    NotImplementedError,
+    AssertionError,
+)
+
+
+def is_retryable_error(exception: Exception) -> bool:
+    """
+    Determine if an error should be retried.
+
+    Non-retryable errors include:
+    - ValueError, TypeError, KeyError, AttributeError (programming errors)
+    - NotImplementedError, AssertionError (logic errors)
+    - Errors with "not found" in the message (missing resources)
+    - Errors with "invalid" in the message (validation failures)
+
+    All other errors are considered potentially transient and retryable.
+
+    Args:
+        exception: The exception to check
+
+    Returns:
+        True if the error should be retried, False otherwise
+    """
+    # Check exception type
+    if isinstance(exception, NON_RETRYABLE_ERRORS):
+        return False
+
+    # Check for common non-retryable error messages
+    error_msg = str(exception).lower()
+    non_retryable_patterns = [
+        "not found",
+        "does not exist",
+        "invalid",
+        "missing required",
+        "permission denied",
+        "unauthorized",
+        "forbidden",
+    ]
+
+    for pattern in non_retryable_patterns:
+        if pattern in error_msg:
+            return False
+
+    return True
+
 
 @dataclass
 class RetryConfig:

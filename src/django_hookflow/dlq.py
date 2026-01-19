@@ -19,6 +19,10 @@ class DeadLetterEntry(models.Model):
     run_id = models.CharField(max_length=255, db_index=True)
     step_id = models.CharField(max_length=255, blank=True, default="")
     payload = models.JSONField()
+    completed_steps = models.JSONField(
+        default=dict,
+        help_text="Completed steps at failure for replay",
+    )
     error_message = models.TextField()
     error_traceback = models.TextField(blank=True, default="")
     attempt_count = models.IntegerField(default=1)
@@ -31,6 +35,12 @@ class DeadLetterEntry(models.Model):
         verbose_name = "Dead Letter Entry"
         verbose_name_plural = "Dead Letter Entries"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["workflow_id", "run_id"],
+                name="dlq_workflow_run_idx",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"DLQ: {self.workflow_id} / {self.run_id}"
@@ -45,6 +55,7 @@ class DeadLetterEntry(models.Model):
         step_id: str = "",
         error_traceback: str = "",
         attempt_count: int = 1,
+        completed_steps: dict[str, Any] | None = None,
     ) -> DeadLetterEntry:
         """
         Create a new dead-letter queue entry for a failed workflow execution.
@@ -57,15 +68,20 @@ class DeadLetterEntry(models.Model):
             step_id: Optional step ID where the failure occurred
             error_traceback: Optional full traceback string
             attempt_count: Number of attempts made before failure
+            completed_steps: Completed steps at time of failure for replay
 
         Returns:
             The created DeadLetterEntry instance
         """
+        if completed_steps is None:
+            completed_steps = {}
+
         return cls.objects.create(
             workflow_id=workflow_id,
             run_id=run_id,
             step_id=step_id,
             payload=payload,
+            completed_steps=completed_steps,
             error_message=error_message,
             error_traceback=error_traceback,
             attempt_count=attempt_count,

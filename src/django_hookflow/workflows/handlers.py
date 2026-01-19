@@ -62,6 +62,29 @@ def verify_qstash_signature(request: HttpRequest) -> bool:
         raise WorkflowError(msg) from e
 
 
+def _generate_idempotency_key(
+    run_id: str,
+    completed_steps: dict[str, Any],
+    attempt: int = 0,
+) -> str:
+    """
+    Generate an idempotency key for QStash messages.
+
+    The key is based on run_id, the number of completed steps, and attempt
+    number to ensure each message is unique and prevent duplicate processing.
+
+    Args:
+        run_id: The unique run identifier
+        completed_steps: Current completed steps dictionary
+        attempt: The retry attempt number
+
+    Returns:
+        A unique idempotency key string
+    """
+    step_count = len(completed_steps)
+    return f"{run_id}:step:{step_count}:attempt:{attempt}"
+
+
 def publish_next_step(
     workflow_id: str,
     run_id: str,
@@ -118,6 +141,13 @@ def publish_next_step(
     try:
         client = QStash(token=qstash_token)
 
+        # Generate idempotency key to prevent duplicate processing
+        idempotency_key = _generate_idempotency_key(
+            run_id=run_id,
+            completed_steps=completed_steps,
+            attempt=attempt,
+        )
+
         # Check if there's a sleep delay from the last step
         last_step_result = None
         if completed_steps:
@@ -131,16 +161,21 @@ def publish_next_step(
         if is_sleep and "slept_for" in last_step_result:
             actual_delay = last_step_result["slept_for"]
 
+        # Common headers with idempotency key
+        headers = {"Idempotency-Key": idempotency_key}
+
         if actual_delay > 0:
             client.message.publish_json(
                 url=webhook_url,
                 body=payload,
                 delay=f"{actual_delay}s",
+                headers=headers,
             )
         else:
             client.message.publish_json(
                 url=webhook_url,
                 body=payload,
+                headers=headers,
             )
 
     except Exception as e:

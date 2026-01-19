@@ -105,14 +105,6 @@ class WorkflowWrapper:
         if run_id is None:
             run_id = str(uuid.uuid4())
 
-        # Create workflow run record if persistence is enabled
-        if _is_persistence_enabled():
-            _get_persistence().create_run(
-                run_id=run_id,
-                workflow_id=self._workflow_id,
-                data=data,
-            )
-
         # Get configuration from settings
         qstash_token = getattr(settings, "QSTASH_TOKEN", None)
         if not qstash_token:
@@ -139,7 +131,8 @@ class WorkflowWrapper:
             "completed_steps": {},
         }
 
-        # Publish to QStash
+        # Publish to QStash first - this ensures we don't create orphan
+        # DB records if QStash publishing fails
         try:
             client = QStash(token=qstash_token)
             client.message.publish_json(
@@ -148,6 +141,28 @@ class WorkflowWrapper:
             )
         except Exception as e:
             raise WorkflowError(f"Failed to trigger workflow: {e}") from e
+
+        # Create workflow run record AFTER successful QStash publish
+        # This prevents orphaned DB records if QStash is unavailable
+        if _is_persistence_enabled():
+            try:
+                _get_persistence().create_run(
+                    run_id=run_id,
+                    workflow_id=self._workflow_id,
+                    data=data,
+                )
+            except Exception as e:
+                # Log but don't fail - the workflow will still execute
+                # and can recover from DB state on next callback
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Failed to create workflow run record (workflow will "
+                    "continue): run_id=%s, error=%s",
+                    run_id,
+                    e,
+                )
 
         return run_id
 

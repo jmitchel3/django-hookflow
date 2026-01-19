@@ -9,17 +9,17 @@ from django_hookflow.models import StepExecution
 from django_hookflow.models import WorkflowRun
 from django_hookflow.workflows.registry import get_all_workflows
 
+from .auth import rate_limit
+from .auth import require_api_auth
+
 
 def serialize_step(step: StepExecution) -> dict[str, Any]:
     """Serialize a StepExecution model to a dictionary."""
     return {
         "step_id": step.step_id,
-        "status": step.status,
         "result": step.result,
-        "error_message": step.error_message,
-        "started_at": step.started_at.isoformat() if step.started_at else None,
-        "completed_at": (
-            step.completed_at.isoformat() if step.completed_at else None
+        "executed_at": (
+            step.executed_at.isoformat() if step.executed_at else None
         ),
     }
 
@@ -27,7 +27,8 @@ def serialize_step(step: StepExecution) -> dict[str, Any]:
 def serialize_workflow_run(run: WorkflowRun) -> dict[str, Any]:
     """Serialize a WorkflowRun model to a dictionary."""
     steps = [
-        serialize_step(step) for step in run.steps.all().order_by("started_at")
+        serialize_step(step)
+        for step in run.step_executions.all().order_by("executed_at")
     ]
     return {
         "run_id": run.run_id,
@@ -46,6 +47,8 @@ def serialize_workflow_run(run: WorkflowRun) -> dict[str, Any]:
 
 
 @require_GET
+@require_api_auth
+@rate_limit
 def workflow_status(request, run_id: str) -> JsonResponse:
     """
     Get the status of a single workflow run by run_id.
@@ -54,10 +57,12 @@ def workflow_status(request, run_id: str) -> JsonResponse:
         JsonResponse with workflow run details or 404 if not found.
     """
     try:
-        run = WorkflowRun.objects.get(run_id=run_id)
+        run = WorkflowRun.objects.prefetch_related("step_executions").get(
+            run_id=run_id
+        )
     except WorkflowRun.DoesNotExist:
         return JsonResponse(
-            {"error": "Workflow run not found", "run_id": run_id},
+            {"error": "Workflow run not found"},
             status=404,
         )
 
@@ -65,6 +70,8 @@ def workflow_status(request, run_id: str) -> JsonResponse:
 
 
 @require_GET
+@require_api_auth
+@rate_limit
 def workflow_list(request) -> JsonResponse:
     """
     List workflow runs with optional filtering.
@@ -91,8 +98,8 @@ def workflow_list(request) -> JsonResponse:
     except (TypeError, ValueError):
         offset = 0
 
-    # Build queryset with filters
-    queryset = WorkflowRun.objects.all()
+    # Build queryset with filters and prefetch related steps
+    queryset = WorkflowRun.objects.prefetch_related("step_executions")
 
     if workflow_id:
         queryset = queryset.filter(workflow_id=workflow_id)
@@ -119,6 +126,8 @@ def workflow_list(request) -> JsonResponse:
 
 
 @require_GET
+@require_api_auth
+@rate_limit
 def workflow_types(request) -> JsonResponse:
     """
     List all registered workflow types.

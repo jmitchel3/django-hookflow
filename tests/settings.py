@@ -24,3 +24,8 @@ QSTASH_CURRENT_SIGNING_KEY = "test-current-signing-key"
 QSTASH_NEXT_SIGNING_KEY = "test-next-signing-key"
 DJANGO_HOOKFLOW_DOMAIN = "https://example.com"
 DJANGO_HOOKFLOW_WEBHOOK_PATH = "/hookflow/"
+
+# API authentication settings for tests
+HOOKFLOW_API_AUTH_REQUIRED = False  # Disable for tests
+HOOKFLOW_API_KEY = "test-api-key"
+HOOKFLOW_RATE_LIMIT = None  # Disable rate limiting for tests

@@ -3,6 +3,9 @@ from __future__ import annotations
 from django.db import models
 from django.utils import timezone
 
+# Import DLQ model to ensure it's discovered by Django's model registry
+from django_hookflow.dlq import DeadLetterEntry  # noqa: F401
+
 
 class WorkflowRunStatus(models.TextChoices):
     """Status choices for workflow runs."""
@@ -54,6 +57,7 @@ class WorkflowRun(models.Model):
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
+        db_index=True,
         help_text="When the workflow run was created",
     )
     updated_at = models.DateTimeField(
@@ -63,6 +67,7 @@ class WorkflowRun(models.Model):
     completed_at = models.DateTimeField(
         null=True,
         blank=True,
+        db_index=True,
         help_text="When the workflow run completed or failed",
     )
 
@@ -104,7 +109,12 @@ class StepExecution(models.Model):
     )
 
     class Meta:
-        unique_together = [("workflow_run", "step_id")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workflow_run", "step_id"],
+                name="unique_workflow_run_step_id",
+            ),
+        ]
         ordering = ["executed_at"]
         verbose_name = "Step Execution"
         verbose_name_plural = "Step Executions"
