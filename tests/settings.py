@@ -9,7 +9,12 @@ INSTALLED_APPS = [
     "django_hookflow",
 ]
 
-DATABASES = {}
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": ":memory:",
+    }
+}
 
 USE_TZ = True
 

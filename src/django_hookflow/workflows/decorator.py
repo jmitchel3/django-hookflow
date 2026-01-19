@@ -16,6 +16,19 @@ from .context import WorkflowContext
 from .registry import generate_workflow_id
 from .registry import register_workflow
 
+
+def _is_persistence_enabled() -> bool:
+    """Check if workflow persistence is enabled."""
+    return getattr(settings, "DJANGO_HOOKFLOW_PERSISTENCE_ENABLED", False)
+
+
+def _get_persistence():
+    """Lazy import of WorkflowPersistence to avoid circular imports."""
+    from django_hookflow.persistence import WorkflowPersistence
+
+    return WorkflowPersistence
+
+
 T = TypeVar("T")
 WorkflowFunc = Callable[[WorkflowContext], T]
 
@@ -91,6 +104,14 @@ class WorkflowWrapper:
 
         if run_id is None:
             run_id = str(uuid.uuid4())
+
+        # Create workflow run record if persistence is enabled
+        if _is_persistence_enabled():
+            _get_persistence().create_run(
+                run_id=run_id,
+                workflow_id=self._workflow_id,
+                data=data,
+            )
 
         # Get configuration from settings
         qstash_token = getattr(settings, "QSTASH_TOKEN", None)

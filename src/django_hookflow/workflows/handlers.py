@@ -68,6 +68,7 @@ def publish_next_step(
     data: dict[str, Any],
     completed_steps: dict[str, Any],
     delay_seconds: int = 0,
+    attempt: int = 0,
 ) -> None:
     """
     Publish the next step invocation to QStash.
@@ -81,6 +82,7 @@ def publish_next_step(
         data: The original workflow payload
         completed_steps: All completed step results so far
         delay_seconds: Optional delay before executing the next step
+        attempt: The current retry attempt number (0 for first attempt)
 
     Raises:
         WorkflowError: If publishing fails
@@ -110,6 +112,7 @@ def publish_next_step(
         "run_id": run_id,
         "data": data,
         "completed_steps": completed_steps,
+        "attempt": attempt,
     }
 
     try:

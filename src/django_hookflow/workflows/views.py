@@ -2,22 +2,39 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from typing import Any
 
+from django.conf import settings
 from django.http import HttpRequest
 from django.http import HttpResponse
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from django_hookflow.dlq import DeadLetterEntry
 from django_hookflow.exceptions import StepCompleted
 from django_hookflow.exceptions import WorkflowError
+from django_hookflow.retry import get_retry_delay
+from django_hookflow.retry import should_retry
 
 from .handlers import publish_next_step
 from .handlers import verify_qstash_signature
 from .registry import get_workflow
 
 logger = logging.getLogger(__name__)
+
+
+def _is_persistence_enabled() -> bool:
+    """Check if workflow persistence is enabled."""
+    return getattr(settings, "DJANGO_HOOKFLOW_PERSISTENCE_ENABLED", False)
+
+
+def _get_persistence():
+    """Lazy import of WorkflowPersistence to avoid circular imports."""
+    from django_hookflow.persistence import WorkflowPersistence
+
+    return WorkflowPersistence
 
 
 @csrf_exempt
@@ -63,6 +80,13 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
     data = payload.get("data", {})
     completed_steps: dict[str, Any] = payload.get("completed_steps", {})
 
+    # 3a. Optionally load/merge completed steps from database
+    if _is_persistence_enabled() and run_id:
+        db_completed_steps = _get_persistence().get_completed_steps(run_id)
+        # Merge DB steps with payload steps (payload takes precedence)
+        merged_steps = {**db_completed_steps, **completed_steps}
+        completed_steps = merged_steps
+
     # Validate payload
     if not payload_workflow_id or payload_workflow_id != workflow_id:
         logger.error(
@@ -105,6 +129,11 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             workflow_id,
             run_id,
         )
+
+        # Persist workflow completion
+        if _is_persistence_enabled():
+            _get_persistence().mark_completed(run_id, result)
+
         return JsonResponse(
             {
                 "status": "completed",
@@ -122,6 +151,10 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             run_id,
             e.step_id,
         )
+
+        # Persist step result
+        if _is_persistence_enabled():
+            _get_persistence().save_step(run_id, e.step_id, e.result)
 
         try:
             publish_next_step(
@@ -157,23 +190,90 @@ def workflow_webhook(request: HttpRequest, workflow_id: str) -> HttpResponse:
             workflow_id,
             run_id,
         )
+
+        # Extract current attempt from payload (default 0)
+        attempt = payload.get("attempt", 0)
+
+        # Check if we should retry
+        if should_retry(attempt):
+            # Schedule retry with exponential backoff
+            retry_delay = get_retry_delay(attempt)
+            logger.info(
+                "Scheduling retry: workflow=%s, run=%s, attempt=%d, delay=%ds",
+                workflow_id,
+                run_id,
+                attempt + 1,
+                retry_delay,
+            )
+
+            try:
+                publish_next_step(
+                    workflow_id=workflow_id,
+                    run_id=run_id,
+                    data=data,
+                    completed_steps=completed_steps,
+                    delay_seconds=retry_delay,
+                    attempt=attempt + 1,
+                )
+                return JsonResponse(
+                    {
+                        "status": "retrying",
+                        "workflow_id": workflow_id,
+                        "run_id": run_id,
+                        "attempt": attempt + 1,
+                        "retry_delay": retry_delay,
+                        "error": str(wf_err),
+                    }
+                )
+            except WorkflowError:
+                logger.exception("Failed to schedule retry")
+                # Fall through to DLQ if retry scheduling fails
+
+        # Max retries exceeded or retry scheduling failed - add to DLQ
+        logger.warning(
+            "Adding to DLQ: workflow_id=%s, run_id=%s, attempts=%d",
+            workflow_id,
+            run_id,
+            attempt + 1,
+        )
+
+        error_tb = traceback.format_exc()
+        DeadLetterEntry.add_entry(
+            workflow_id=workflow_id,
+            run_id=run_id,
+            payload=payload,
+            error_message=str(wf_err),
+            error_traceback=error_tb,
+            attempt_count=attempt + 1,
+        )
+
+        # Persist workflow failure
+        if _is_persistence_enabled():
+            _get_persistence().mark_failed(run_id, str(wf_err))
+
         return JsonResponse(
             {
                 "error": "Workflow execution failed",
                 "detail": str(wf_err),
                 "workflow_id": workflow_id,
                 "run_id": run_id,
+                "added_to_dlq": True,
             },
             status=500,
         )
 
-    except Exception:
+    except Exception as exc:
         # Unexpected error
         logger.exception(
             "Unexpected error in workflow: workflow_id=%s, run_id=%s",
             workflow_id,
             run_id,
         )
+
+        # Persist workflow failure
+        if _is_persistence_enabled():
+            _get_persistence().mark_failed(run_id, f"Unexpected error: {exc}")
+
         return JsonResponse(
             {
                 "error": "Internal server error",
