@@ -49,6 +49,7 @@ class TestStepManagerCall(unittest.TestCase):
             json=None,
             headers=None,
             timeout=30,
+            verify=True,
         )
         self.assertEqual(context.exception.step_id, "get-step")
         self.assertEqual(context.exception.result["status_code"], 200)
@@ -79,6 +80,7 @@ class TestStepManagerCall(unittest.TestCase):
             json=body,
             headers=None,
             timeout=30,
+            verify=True,
         )
         self.assertEqual(context.exception.result["status_code"], 201)
         self.assertEqual(context.exception.result["data"], {"id": 123})
@@ -110,6 +112,67 @@ class TestStepManagerCall(unittest.TestCase):
             json=None,
             headers=custom_headers,
             timeout=30,
+            verify=True,
+        )
+
+    @patch("requests.request")
+    def test_call_allows_verify_override_when_enabled(self, mock_request):
+        """Test that verify override applies when setting is enabled."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok": true}'
+        mock_response.json.return_value = {"ok": True}
+        mock_request.return_value = mock_response
+
+        with patch(
+            "django.conf.settings.DJANGO_HOOKFLOW_VERIFY_SSL",
+            True,
+            create=True,
+        ):
+            with self.assertRaises(StepCompleted):
+                self.manager.call(
+                    "verify-step",
+                    "https://api.example.com/verify",
+                    verify=False,
+                )
+
+        mock_request.assert_called_once_with(
+            method="GET",
+            url="https://api.example.com/verify",
+            json=None,
+            headers=None,
+            timeout=30,
+            verify=False,
+        )
+
+    @patch("requests.request")
+    def test_call_forces_verify_when_disabled_globally(self, mock_request):
+        """Test that verify remains True when setting is disabled."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok": true}'
+        mock_response.json.return_value = {"ok": True}
+        mock_request.return_value = mock_response
+
+        with patch(
+            "django.conf.settings.DJANGO_HOOKFLOW_VERIFY_SSL",
+            False,
+            create=True,
+        ):
+            with self.assertRaises(StepCompleted):
+                self.manager.call(
+                    "verify-step",
+                    "https://api.example.com/verify",
+                    verify=False,
+                )
+
+        mock_request.assert_called_once_with(
+            method="GET",
+            url="https://api.example.com/verify",
+            json=None,
+            headers=None,
+            timeout=30,
+            verify=True,
         )
 
     @patch("requests.request")
@@ -218,6 +281,7 @@ class TestStepManagerCall(unittest.TestCase):
             json=body,
             headers=None,
             timeout=30,
+            verify=True,
         )
         self.assertEqual(context.exception.result["status_code"], 200)
 
@@ -246,6 +310,7 @@ class TestStepManagerCall(unittest.TestCase):
             json=body,
             headers=None,
             timeout=30,
+            verify=True,
         )
         self.assertEqual(context.exception.result["status_code"], 200)
 
@@ -270,6 +335,7 @@ class TestStepManagerCall(unittest.TestCase):
             json=None,
             headers=None,
             timeout=30,
+            verify=True,
         )
         self.assertEqual(context.exception.result["status_code"], 204)
 

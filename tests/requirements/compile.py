@@ -5,74 +5,83 @@ import os
 import subprocess
 import sys
 import tempfile
+from functools import partial
 from pathlib import Path
 
 
-def compile_requirements(
-    python_version: str,
-    django_constraint: str,
-    output_file: str,
-) -> None:
-    """Compile requirements with a Django version constraint."""
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".txt",
-        delete=False,
-    ) as f:
-        f.write(django_constraint)
-        constraint_file = f.name
-
-    try:
-        subprocess.run(
-            [
-                "uv",
-                "pip",
-                "compile",
-                "--quiet",
-                "--generate-hashes",
-                "--constraint",
-                constraint_file,
-                "requirements.in",
-                "--python",
-                python_version,
-                "--output-file",
-                output_file,
-                *sys.argv[1:],
-            ],
-            check=True,
-        )
-    finally:
-        os.unlink(constraint_file)
+def load_django_constraints(path: Path) -> dict[str, str]:
+    constraints: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            raise ValueError(f"Invalid constraint line: {line}")
+        key, constraint = stripped.split("=", 1)
+        constraints[key.strip()] = constraint.strip()
+    return constraints
 
 
 if __name__ == "__main__":
     os.chdir(Path(__file__).parent)
+    common_args = [
+        "uv",
+        "pip",
+        "compile",
+        "--quiet",
+        "--generate-hashes",
+        "requirements.in",
+        *sys.argv[1:],
+    ]
+    run = partial(subprocess.run, check=True)
 
-    # Python 3.10
-    compile_requirements("3.10", "Django>=4.2a1,<5.0", "py310-django42.txt")
-    compile_requirements("3.10", "Django>=5.0a1,<5.1", "py310-django50.txt")
-    compile_requirements("3.10", "Django>=5.1a1,<5.2", "py310-django51.txt")
-    compile_requirements("3.10", "Django>=5.2a1,<5.3", "py310-django52.txt")
+    # Define Python versions and Django versions
+    python_versions = ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    django_versions = load_django_constraints(Path("django-constraints.txt"))
 
-    # Python 3.11
-    compile_requirements("3.11", "Django>=4.2a1,<5.0", "py311-django42.txt")
-    compile_requirements("3.11", "Django>=5.0a1,<5.1", "py311-django50.txt")
-    compile_requirements("3.11", "Django>=5.1a1,<5.2", "py311-django51.txt")
-    compile_requirements("3.11", "Django>=5.2a1,<5.3", "py311-django52.txt")
+    # Define the specific combinations to run
+    # Format: (python_version, django_version)
+    combinations = [
+        ("3.10", "42"),
+        ("3.10", "50"),
+        ("3.10", "51"),
+        ("3.10", "52"),
+        ("3.11", "42"),
+        ("3.11", "50"),
+        ("3.11", "51"),
+        ("3.11", "52"),
+        ("3.12", "42"),
+        ("3.12", "50"),
+        ("3.12", "51"),
+        ("3.12", "52"),
+        ("3.13", "51"),
+        ("3.13", "52"),
+        ("3.13", "60"),
+        ("3.14", "51"),
+        ("3.14", "52"),
+        ("3.14", "60"),
+    ]
 
-    # Python 3.12
-    compile_requirements("3.12", "Django>=4.2a1,<5.0", "py312-django42.txt")
-    compile_requirements("3.12", "Django>=5.0a1,<5.1", "py312-django50.txt")
-    compile_requirements("3.12", "Django>=5.1a1,<5.2", "py312-django51.txt")
-    compile_requirements("3.12", "Django>=5.2a1,<5.3", "py312-django52.txt")
-    compile_requirements("3.12", "Django>=6.0a1,<6.1", "py312-django60.txt")
+    # Run the combinations
+    for py_version, dj_version in combinations:
+        output_file = f"py{py_version.replace('.', '')}-django{dj_version}.txt"
+        django_constraint = django_versions[dj_version]
 
-    # Python 3.13
-    compile_requirements("3.13", "Django>=5.1a1,<5.2", "py313-django51.txt")
-    compile_requirements("3.13", "Django>=5.2a1,<5.3", "py313-django52.txt")
-    compile_requirements("3.13", "Django>=6.0a1,<6.1", "py313-django60.txt")
+        with tempfile.NamedTemporaryFile("w", delete=False) as constraint_file:
+            constraint_file.write(f"{django_constraint}\n")
+            constraint_path = constraint_file.name
 
-    # Python 3.14
-    compile_requirements("3.14", "Django>=5.1a1,<5.2", "py314-django51.txt")
-    compile_requirements("3.14", "Django>=5.2a1,<5.3", "py314-django52.txt")
-    compile_requirements("3.14", "Django>=6.0a1,<6.1", "py314-django60.txt")
+        try:
+            run(
+                [
+                    *common_args,
+                    "--constraints",
+                    constraint_path,
+                    "--python",
+                    py_version,
+                    "--output-file",
+                    output_file,
+                ]
+            )
+        finally:
+            os.unlink(constraint_path)
