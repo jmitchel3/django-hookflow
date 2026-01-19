@@ -33,6 +33,7 @@ classifiers = [
 
 dependencies = [
   "django>=4.2",
+  "django-qstash>=0.2",
   "requests>=2.30",
 ]
 urls.Changelog = "https://github.com/jmitchel3/django-hookflow"
@@ -40,11 +41,21 @@ urls.Documentation = "https://github.com/jmitchel3/django-hookflow"
 urls.Funding = "https://github.com/jmitchel3/django-hookflow"
 urls.Repository = "https://github.com/jmitchel3/django-hookflow"
 
+[dependency-groups]
+dev = [
+  "pytest>=9.0.2",
+  "pytest-django>=4.11.1",
+]
+
+[tool.black]
+line-length = 79
+
 [tool.isort]
 add_imports = [
   "from __future__ import annotations",
 ]
 force_single_line = true
+line_length = 79
 profile = "black"
 src_paths = [
   ".",
@@ -62,6 +73,7 @@ addopts = """\
     --ds=tests.settings
     """
 django_find_project = false
+pythonpath = [ "." ]
 xfail_strict = true
 
 [tool.coverage.run]
