@@ -9,6 +9,9 @@ from django.http import HttpRequest
 
 from django_hookflow.exceptions import WorkflowError
 
+# Default clock skew tolerance in seconds
+DEFAULT_CLOCK_SKEW_SECONDS = 60
+
 
 class QStashReceiver:
     """
@@ -38,6 +41,7 @@ class QStashReceiver:
         signature: str,
         body: str,
         url: str,
+        clock_skew_seconds: int | None = None,
     ) -> dict[str, Any]:
         """
         Verify a QStash webhook signature.
@@ -46,6 +50,9 @@ class QStashReceiver:
             signature: The Upstash-Signature header value (JWT token)
             body: The raw request body as a string
             url: The full URL of the webhook endpoint
+            clock_skew_seconds: Tolerance for clock skew between servers.
+                Used as leeway for JWT exp/nbf validation. Defaults to
+                DJANGO_HOOKFLOW_CLOCK_SKEW_SECONDS setting or 60 seconds.
 
         Returns:
             The decoded JWT claims if verification succeeds
@@ -53,6 +60,13 @@ class QStashReceiver:
         Raises:
             WorkflowError: If signature verification fails
         """
+        if clock_skew_seconds is None:
+            clock_skew_seconds = getattr(
+                settings,
+                "DJANGO_HOOKFLOW_CLOCK_SKEW_SECONDS",
+                DEFAULT_CLOCK_SKEW_SECONDS,
+            )
+
         keys = [self._current_key, self._next_key]
 
         for key in keys:
@@ -64,6 +78,7 @@ class QStashReceiver:
                     options={
                         "require": ["iss", "sub", "exp", "nbf", "body"],
                     },
+                    leeway=clock_skew_seconds,
                 )
 
                 if claims.get("iss") != "Upstash":
@@ -91,7 +106,10 @@ class QStashReceiver:
         )
 
 
-def verify_qstash_signature(request: HttpRequest) -> bool:
+def verify_qstash_signature(
+    request: HttpRequest,
+    clock_skew_seconds: int | None = None,
+) -> bool:
     """
     Verify that a request came from QStash.
 
@@ -100,6 +118,9 @@ def verify_qstash_signature(request: HttpRequest) -> bool:
 
     Args:
         request: The Django HTTP request to verify
+        clock_skew_seconds: Tolerance for clock skew between servers.
+            Used as leeway for JWT exp/nbf validation. Defaults to
+            DJANGO_HOOKFLOW_CLOCK_SKEW_SECONDS setting or 60 seconds.
 
     Returns:
         True if the signature is valid
@@ -127,5 +148,10 @@ def verify_qstash_signature(request: HttpRequest) -> bool:
         )
 
     receiver = QStashReceiver(current_key, next_key)
-    receiver.verify(signature=signature, body=body, url=url)
+    receiver.verify(
+        signature=signature,
+        body=body,
+        url=url,
+        clock_skew_seconds=clock_skew_seconds,
+    )
     return True

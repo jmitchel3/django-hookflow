@@ -19,7 +19,7 @@ from .registry import register_workflow
 
 def _is_persistence_enabled() -> bool:
     """Check if workflow persistence is enabled."""
-    return getattr(settings, "DJANGO_HOOKFLOW_PERSISTENCE_ENABLED", False)
+    return getattr(settings, "DJANGO_HOOKFLOW_PERSISTENCE_ENABLED", True)
 
 
 def _get_persistence():
@@ -47,6 +47,7 @@ class WorkflowWrapper:
         self,
         func: WorkflowFunc[T],
         workflow_id: str | None = None,
+        timeout: int | None = None,
     ) -> None:
         """
         Initialize the WorkflowWrapper.
@@ -54,15 +55,23 @@ class WorkflowWrapper:
         Args:
             func: The workflow function to wrap
             workflow_id: Optional custom workflow ID (auto-generated if None)
+            timeout: Optional per-workflow timeout in seconds. If not set,
+                uses DJANGO_HOOKFLOW_EXECUTION_TIMEOUT setting.
         """
         self._func = func
         self._workflow_id = workflow_id or generate_workflow_id(func)
+        self._timeout = timeout
         functools.update_wrapper(self, func)
 
     @property
     def workflow_id(self) -> str:
         """The unique identifier for this workflow."""
         return self._workflow_id
+
+    @property
+    def timeout(self) -> int | None:
+        """Per-workflow timeout in seconds, or None to use global default."""
+        return self._timeout
 
     def __call__(self, ctx: WorkflowContext) -> T:
         """
@@ -201,6 +210,7 @@ def workflow(
     func: WorkflowFunc[T] | None = None,
     *,
     workflow_id: str | None = None,
+    timeout: int | None = None,
 ) -> WorkflowWrapper | Callable[[WorkflowFunc[T]], WorkflowWrapper]:
     """
     Decorator to define a durable workflow function.
@@ -214,20 +224,23 @@ def workflow(
         def my_workflow(ctx):
             ...
 
-        @workflow(workflow_id="custom-id")
+        @workflow(workflow_id="custom-id", timeout=60)
         def my_workflow(ctx):
             ...
 
     Args:
         func: The workflow function (when used without parentheses)
         workflow_id: Optional custom workflow ID
+        timeout: Optional per-workflow timeout in seconds. Overrides the
+            global DJANGO_HOOKFLOW_EXECUTION_TIMEOUT setting for this
+            workflow. Use 0 to disable timeout for this workflow.
 
     Returns:
         WorkflowWrapper instance with .trigger() method
     """
 
     def decorator(fn: WorkflowFunc[T]) -> WorkflowWrapper:
-        wrapper = WorkflowWrapper(fn, workflow_id=workflow_id)
+        wrapper = WorkflowWrapper(fn, workflow_id=workflow_id, timeout=timeout)
         register_workflow(wrapper.workflow_id, wrapper)
         return wrapper
 

@@ -55,6 +55,10 @@ class WorkflowRun(models.Model):
         default="",
         help_text="Error message if the workflow failed",
     )
+    retry_attempt = models.PositiveIntegerField(
+        default=0,
+        help_text="Current retry attempt number for failed step executions",
+    )
     created_at = models.DateTimeField(
         auto_now_add=True,
         db_index=True,

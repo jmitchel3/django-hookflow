@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import requests
 from django.conf import settings
 
+from django_hookflow.circuit_breaker import CircuitBreakerError
+from django_hookflow.circuit_breaker import get_qstash_circuit_breaker
 from django_hookflow.exceptions import WorkflowError
+
+logger = logging.getLogger(__name__)
 
 QSTASH_API_URL = "https://qstash.upstash.io/v2/publish/"
 
@@ -52,7 +57,7 @@ class QStashClient:
             The QStash API response containing messageId
 
         Raises:
-            WorkflowError: If the publish request fails
+            WorkflowError: If the publish request fails or circuit is open
         """
         request_headers: dict[str, str] = {
             "Authorization": f"Bearer {self._token}",
@@ -74,17 +79,55 @@ class QStashClient:
 
         publish_url = f"{QSTASH_API_URL}{url}"
 
+        # Use circuit breaker for the actual HTTP call
+        circuit_breaker = get_qstash_circuit_breaker()
+
         try:
-            response = requests.post(
+            return circuit_breaker.call(
+                self._do_publish,
                 publish_url,
-                data=json.dumps(body),
-                headers=request_headers,
-                timeout=30,
+                body,
+                request_headers,
             )
-            response.raise_for_status()
-            return response.json()
+        except CircuitBreakerError as e:
+            logger.warning(
+                "QStash publish blocked by circuit breaker: %s",
+                e,
+            )
+            raise WorkflowError(f"QStash circuit breaker is open: {e}") from e
         except requests.RequestException as e:
             raise WorkflowError(f"QStash publish failed: {e}") from e
+
+    def _do_publish(
+        self,
+        publish_url: str,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """
+        Perform the actual HTTP POST to QStash.
+
+        This is separated out to allow the circuit breaker to wrap it.
+
+        Args:
+            publish_url: The full QStash API URL
+            body: The JSON payload
+            headers: Request headers
+
+        Returns:
+            The QStash API response
+
+        Raises:
+            requests.RequestException: If the HTTP request fails
+        """
+        response = requests.post(
+            publish_url,
+            data=json.dumps(body),
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 def get_qstash_client() -> QStashClient:

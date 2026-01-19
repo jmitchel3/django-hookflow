@@ -225,3 +225,70 @@ class WorkflowPersistence:
             error_message,
         )
         return workflow_run
+
+    @staticmethod
+    @transaction.atomic
+    def increment_retry_attempt(run_id: str) -> int | None:
+        """
+        Increment the retry attempt counter for a workflow run.
+
+        Args:
+            run_id: The unique identifier for the workflow run
+
+        Returns:
+            The new retry attempt count, or None if the run was not found
+        """
+        try:
+            workflow_run = WorkflowRun.objects.select_for_update().get(
+                run_id=run_id
+            )
+        except WorkflowRun.DoesNotExist:
+            logger.warning(
+                "Cannot increment retry: workflow run not found: run_id=%s",
+                run_id,
+            )
+            return None
+
+        workflow_run.retry_attempt += 1
+        workflow_run.save(update_fields=["retry_attempt", "updated_at"])
+
+        logger.debug(
+            "Incremented retry attempt: run_id=%s, attempt=%d",
+            run_id,
+            workflow_run.retry_attempt,
+        )
+        return workflow_run.retry_attempt
+
+    @staticmethod
+    @transaction.atomic
+    def reset_retry_attempt(run_id: str) -> bool:
+        """
+        Reset the retry attempt counter to zero for a workflow run.
+
+        Typically called after a successful step completion.
+
+        Args:
+            run_id: The unique identifier for the workflow run
+
+        Returns:
+            True if successful, False if the run was not found
+        """
+        try:
+            workflow_run = WorkflowRun.objects.select_for_update().get(
+                run_id=run_id
+            )
+        except WorkflowRun.DoesNotExist:
+            logger.warning(
+                "Cannot reset retry: workflow run not found: run_id=%s",
+                run_id,
+            )
+            return False
+
+        workflow_run.retry_attempt = 0
+        workflow_run.save(update_fields=["retry_attempt", "updated_at"])
+
+        logger.debug(
+            "Reset retry attempt: run_id=%s",
+            run_id,
+        )
+        return True

@@ -15,6 +15,32 @@ class WorkflowError(HookFlowException):
     pass
 
 
+class ExecutionTimeoutError(WorkflowError):
+    """
+    Raised when workflow execution exceeds the configured timeout.
+
+    This is a cooperative timeout using threading. It checks at periodic
+    intervals and will not interrupt blocking I/O operations immediately.
+
+    Attributes:
+        timeout_seconds: The timeout duration that was exceeded
+        workflow_id: The workflow that timed out (if available)
+        run_id: The run that timed out (if available)
+    """
+
+    def __init__(
+        self,
+        message: str,
+        timeout_seconds: int | None = None,
+        workflow_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.timeout_seconds = timeout_seconds
+        self.workflow_id = workflow_id
+        self.run_id = run_id
+
+
 class StepCompleted(Exception):
     """
     Raised to halt workflow execution and schedule the next step.
