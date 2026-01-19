@@ -183,10 +183,10 @@ class TestWorkflowWrapper(unittest.TestCase):
     def setUp(self):
         _workflow_registry.clear()
 
-    @patch("django_hookflow.workflows.decorator.QStash")
-    def test_trigger_returns_run_id(self, mock_qstash_class):
+    @patch("django_hookflow.workflows.decorator.get_qstash_client")
+    def test_trigger_returns_run_id(self, mock_get_client):
         mock_client = MagicMock()
-        mock_qstash_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         @workflow
         def test_workflow(ctx):
@@ -195,12 +195,12 @@ class TestWorkflowWrapper(unittest.TestCase):
         run_id = test_workflow.trigger(data={"key": "value"})
 
         self.assertIsNotNone(run_id)
-        mock_client.message.publish_json.assert_called_once()
+        mock_client.publish_json.assert_called_once()
 
-    @patch("django_hookflow.workflows.decorator.QStash")
-    def test_trigger_with_custom_run_id(self, mock_qstash_class):
+    @patch("django_hookflow.workflows.decorator.get_qstash_client")
+    def test_trigger_with_custom_run_id(self, mock_get_client):
         mock_client = MagicMock()
-        mock_qstash_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         @workflow
         def test_workflow(ctx):
@@ -210,10 +210,10 @@ class TestWorkflowWrapper(unittest.TestCase):
 
         self.assertEqual(run_id, "custom-run-id")
 
-    @patch("django_hookflow.workflows.decorator.QStash")
-    def test_trigger_builds_correct_webhook_url(self, mock_qstash_class):
+    @patch("django_hookflow.workflows.decorator.get_qstash_client")
+    def test_trigger_builds_correct_webhook_url(self, mock_get_client):
         mock_client = MagicMock()
-        mock_qstash_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         @workflow(workflow_id="my-workflow")
         def test_workflow(ctx):
@@ -221,7 +221,7 @@ class TestWorkflowWrapper(unittest.TestCase):
 
         test_workflow.trigger(data={})
 
-        call_kwargs = mock_client.message.publish_json.call_args
+        call_kwargs = mock_client.publish_json.call_args
         url = call_kwargs.kwargs["url"]
         self.assertIn("/hookflow/workflow/my-workflow/", url)
 

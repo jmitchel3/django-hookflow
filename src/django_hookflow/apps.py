@@ -62,25 +62,13 @@ class DjangoHookflowConfig(AppConfig):
                 "durability features."
             )
 
-        # Log API auth status
-        api_auth_required = getattr(
-            settings, "HOOKFLOW_API_AUTH_REQUIRED", True
-        )
-        if not api_auth_required:
-            logger.warning(
-                "API authentication is disabled "
-                "(HOOKFLOW_API_AUTH_REQUIRED=False). "
-                "This is not recommended for production."
-            )
-
 
 @register()
 def check_hookflow_settings(app_configs, **kwargs):
     """
     Django system check for hookflow configuration.
 
-    Returns errors for missing required settings and warnings for
-    recommended settings.
+    Returns warnings for missing recommended settings.
     """
     errors = []
 
@@ -124,35 +112,6 @@ def check_hookflow_settings(app_configs, **kwargs):
                     "QSTASH_NEXT_SIGNING_KEY for webhook verification."
                 ),
                 id="django_hookflow.W003",
-            )
-        )
-
-    # Check API authentication
-    api_auth_required = getattr(settings, "HOOKFLOW_API_AUTH_REQUIRED", True)
-    api_key = getattr(settings, "HOOKFLOW_API_KEY", None)
-    api_backend = getattr(settings, "HOOKFLOW_API_AUTH_BACKEND", None)
-
-    if api_auth_required and not api_key and not api_backend:
-        errors.append(
-            Warning(
-                "API authentication is required but no method configured",
-                hint=(
-                    "Set HOOKFLOW_API_KEY or HOOKFLOW_API_AUTH_BACKEND, "
-                    "or disable with HOOKFLOW_API_AUTH_REQUIRED=False"
-                ),
-                id="django_hookflow.W004",
-            )
-        )
-
-    if not api_auth_required:
-        errors.append(
-            Warning(
-                "API authentication is disabled",
-                hint=(
-                    "Consider enabling HOOKFLOW_API_AUTH_REQUIRED "
-                    "for production."
-                ),
-                id="django_hookflow.W005",
             )
         )
 

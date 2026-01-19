@@ -4,16 +4,17 @@ from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest
-from qstash import Receiver
 
 from django_hookflow.exceptions import WorkflowError
+from django_hookflow.qstash import get_qstash_client
+from django_hookflow.qstash import verify_qstash_signature as _verify_signature
 
 
 def verify_qstash_signature(request: HttpRequest) -> bool:
     """
     Verify that a request came from QStash.
 
-    This uses the QStash Receiver to verify the signature header
+    This verifies the JWT signature in the Upstash-Signature header
     against the configured signing keys.
 
     Args:
@@ -25,41 +26,7 @@ def verify_qstash_signature(request: HttpRequest) -> bool:
     Raises:
         WorkflowError: If verification fails or keys not configured
     """
-    current_signing_key = getattr(settings, "QSTASH_CURRENT_SIGNING_KEY", None)
-    next_signing_key = getattr(settings, "QSTASH_NEXT_SIGNING_KEY", None)
-
-    if not current_signing_key or not next_signing_key:
-        raise WorkflowError(
-            "QSTASH_CURRENT_SIGNING_KEY and QSTASH_NEXT_SIGNING_KEY "
-            "must be set in Django settings"
-        )
-
-    receiver = Receiver(
-        current_signing_key=current_signing_key,
-        next_signing_key=next_signing_key,
-    )
-
-    # Get the signature from headers
-    signature = request.headers.get("Upstash-Signature")
-    if not signature:
-        raise WorkflowError("Missing Upstash-Signature header")
-
-    # Get the request body
-    body = request.body.decode("utf-8")
-
-    # Build the full URL for verification
-    url = request.build_absolute_uri()
-
-    try:
-        receiver.verify(
-            body=body,
-            signature=signature,
-            url=url,
-        )
-        return True
-    except Exception as e:
-        msg = f"QStash signature verification failed: {e}"
-        raise WorkflowError(msg) from e
+    return _verify_signature(request)
 
 
 def _generate_idempotency_key(
@@ -110,12 +77,6 @@ def publish_next_step(
     Raises:
         WorkflowError: If publishing fails
     """
-    from qstash import QStash
-
-    qstash_token = getattr(settings, "QSTASH_TOKEN", None)
-    if not qstash_token:
-        raise WorkflowError("QSTASH_TOKEN is not set in Django settings")
-
     domain = getattr(settings, "DJANGO_HOOKFLOW_DOMAIN", None)
     if not domain:
         msg = "DJANGO_HOOKFLOW_DOMAIN is not set in Django settings"
@@ -139,8 +100,6 @@ def publish_next_step(
     }
 
     try:
-        client = QStash(token=qstash_token)
-
         # Generate idempotency key to prevent duplicate processing
         idempotency_key = _generate_idempotency_key(
             run_id=run_id,
@@ -161,21 +120,21 @@ def publish_next_step(
         if is_sleep and "slept_for" in last_step_result:
             actual_delay = last_step_result["slept_for"]
 
-        # Common headers with idempotency key
-        headers = {"Idempotency-Key": idempotency_key}
+        # Get the QStash client
+        client = get_qstash_client()
 
         if actual_delay > 0:
-            client.message.publish_json(
+            client.publish_json(
                 url=webhook_url,
                 body=payload,
                 delay=f"{actual_delay}s",
-                headers=headers,
+                deduplication_id=idempotency_key,
             )
         else:
-            client.message.publish_json(
+            client.publish_json(
                 url=webhook_url,
                 body=payload,
-                headers=headers,
+                deduplication_id=idempotency_key,
             )
 
     except Exception as e:

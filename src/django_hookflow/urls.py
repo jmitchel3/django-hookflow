@@ -7,5 +7,4 @@ app_name = "django_hookflow"
 
 urlpatterns = [
     path("", include("django_hookflow.workflows.urls")),
-    path("api/", include("django_hookflow.api.urls")),
 ]

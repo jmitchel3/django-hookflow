@@ -7,9 +7,9 @@ from typing import Callable
 from typing import TypeVar
 
 from django.conf import settings
-from qstash import QStash
 
 from django_hookflow.exceptions import WorkflowError
+from django_hookflow.qstash import get_qstash_client
 
 from .context import StepManager
 from .context import WorkflowContext
@@ -106,10 +106,6 @@ class WorkflowWrapper:
             run_id = str(uuid.uuid4())
 
         # Get configuration from settings
-        qstash_token = getattr(settings, "QSTASH_TOKEN", None)
-        if not qstash_token:
-            raise WorkflowError("QSTASH_TOKEN is not set in Django settings")
-
         domain = getattr(settings, "DJANGO_HOOKFLOW_DOMAIN", None)
         if not domain:
             msg = "DJANGO_HOOKFLOW_DOMAIN is not set in Django settings"
@@ -134,8 +130,7 @@ class WorkflowWrapper:
         # Publish to QStash first - this ensures we don't create orphan
         # DB records if QStash publishing fails
         try:
-            client = QStash(token=qstash_token)
-            client.message.publish_json(
+            get_qstash_client().publish_json(
                 url=webhook_url,
                 body=payload,
             )
