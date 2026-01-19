@@ -13,10 +13,6 @@ DATABASES = {}
 
 USE_TZ = True
 
-# GitHub settings for existing tests
-GITHUB_PERSONAL_ACCESS_TOKEN = "test-token"
-GITHUB_DEFAULT_REPO = "test/repo"
-
 # QStash settings for workflow tests
 QSTASH_TOKEN = "test-qstash-token"
 QSTASH_CURRENT_SIGNING_KEY = "test-current-signing-key"

@@ -1,6 +1,6 @@
 # Django Hookflow
 
-Durable workflows and GitHub Actions integration for Django, powered by [Upstash QStash](https://upstash.com/docs/qstash) and [Django QStash](https://github.com/jmitchel3/django-qstash)
+Durable workflows for Django, powered by [Upstash QStash](https://upstash.com/docs/qstash) and [Django QStash](https://github.com/jmitchel3/django-qstash)
 
 ## Installation
 
@@ -21,11 +21,8 @@ pip install django-hookflow
 ## Features
 
 - **Durable Workflows**: Multi-step workflows that survive restarts and failures
-- **GitHub Actions**: Trigger GitHub workflows from Django functions
 
 ## Quick Start
-
-### Durable Workflows
 
 Define workflows with steps that automatically checkpoint their progress. If a step fails or the server restarts, the workflow resumes from where it left off.
 
@@ -64,14 +61,9 @@ run_id = process_order.trigger(data={"order_id": "12345"})
 Add to your Django settings:
 
 ```python
-# Required for workflows
 QSTASH_TOKEN = "your-qstash-token"
 DJANGO_HOOKFLOW_DOMAIN = "https://your-app.com"
 DJANGO_HOOKFLOW_WEBHOOK_PATH = "/hookflow/"  # optional, defaults to /hookflow/
-
-# Required for GitHub Actions
-GITHUB_PERSONAL_ACCESS_TOKEN = "your-github-pat"
-GITHUB_DEFAULT_REPO = "user/repo"  # optional default
 ```
 
 Add the webhook URLs to your `urls.py`:
@@ -82,25 +74,6 @@ from django.urls import include, path
 urlpatterns = [
     path("hookflow/", include("django_hookflow.urls")),
 ]
-```
-
-### GitHub Actions Integration
-
-Trigger GitHub Actions workflows from your Django code:
-
-```python
-from django_hookflow import trigger_github_workflow, dispatch_workflow
-
-
-# As a decorator - triggers workflow after function completes
-@trigger_github_workflow(repo="user/repo", workflow_file="deploy.yml")
-def deploy_feature(feature_name):
-    # Your logic here
-    return f"Deploying {feature_name}"
-
-
-# Direct dispatch
-dispatch_workflow(repo="user/repo", workflow_file="build.yml", ref="main")
 ```
 
 ## Workflow Context API
