@@ -22,6 +22,38 @@ def load_django_constraints(path: Path) -> dict[str, str]:
     return constraints
 
 
+def write_temp_constraints(constraints: list[str]) -> str:
+    with tempfile.NamedTemporaryFile("w", delete=False) as constraint_file:
+        for constraint in constraints:
+            constraint_file.write(f"{constraint}\n")
+        return constraint_file.name
+
+
+def compile_requirements(
+    base_args: list[str],
+    py_version: str,
+    django_constraint: str,
+    output_file: str,
+) -> None:
+    temp_file = write_temp_constraints([django_constraint])
+    run = partial(subprocess.run, check=True)
+
+    try:
+        run(
+            [
+                *base_args,
+                "--constraints",
+                temp_file,
+                "--python",
+                py_version,
+                "--output-file",
+                output_file,
+            ]
+        )
+    finally:
+        os.unlink(temp_file)
+
+
 if __name__ == "__main__":
     os.chdir(Path(__file__).parent)
     common_args = [
@@ -33,7 +65,6 @@ if __name__ == "__main__":
         "requirements.in",
         *sys.argv[1:],
     ]
-    run = partial(subprocess.run, check=True)
 
     # Define Python versions and Django versions
     python_versions = ["3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -43,17 +74,15 @@ if __name__ == "__main__":
     # Format: (python_version, django_version)
     combinations = [
         ("3.10", "42"),
-        ("3.10", "50"),
         ("3.10", "51"),
         ("3.10", "52"),
         ("3.11", "42"),
-        ("3.11", "50"),
         ("3.11", "51"),
         ("3.11", "52"),
         ("3.12", "42"),
-        ("3.12", "50"),
         ("3.12", "51"),
         ("3.12", "52"),
+        ("3.12", "60"),
         ("3.13", "51"),
         ("3.13", "52"),
         ("3.13", "60"),
@@ -66,22 +95,9 @@ if __name__ == "__main__":
     for py_version, dj_version in combinations:
         output_file = f"py{py_version.replace('.', '')}-django{dj_version}.txt"
         django_constraint = django_versions[dj_version]
-
-        with tempfile.NamedTemporaryFile("w", delete=False) as constraint_file:
-            constraint_file.write(f"{django_constraint}\n")
-            constraint_path = constraint_file.name
-
-        try:
-            run(
-                [
-                    *common_args,
-                    "--constraints",
-                    constraint_path,
-                    "--python",
-                    py_version,
-                    "--output-file",
-                    output_file,
-                ]
-            )
-        finally:
-            os.unlink(constraint_path)
+        compile_requirements(
+            common_args,
+            py_version,
+            django_constraint,
+            output_file,
+        )

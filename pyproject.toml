@@ -17,7 +17,6 @@ requires-python = ">=3.10"
 classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: Django :: 4.2",
-  "Framework :: Django :: 5.0",
   "Framework :: Django :: 5.1",
   "Framework :: Django :: 5.2",
   "Framework :: Django :: 6.0",
@@ -39,6 +38,13 @@ dependencies = [
   "pyjwt>=2",
   "requests>=2.30",
 ]
+
+optional-dependencies.all = [
+  "django-ratelimit>=4.1",
+]
+optional-dependencies.ratelimit = [
+  "django-ratelimit>=4.1",
+]
 urls.Changelog = "https://github.com/jmitchel3/django-hookflow"
 urls.Documentation = "https://github.com/jmitchel3/django-hookflow"
 urls.Funding = "https://github.com/jmitchel3/django-hookflow"
@@ -48,6 +54,7 @@ urls.Repository = "https://github.com/jmitchel3/django-hookflow"
 dev = [
   "django-stubs>=5.2.8",
   "mypy>=1.19.1",
+  "pre-commit>=4.5.1",
   "pytest>=9.0.2",
   "pytest-django>=4.11.1",
 ]

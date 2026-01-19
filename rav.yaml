@@ -9,3 +9,5 @@ scripts:
     - uv run python tests/requirements/update_django_constraints.py
   compile_test_requirements:
     - uv run python tests/requirements/compile.py
+  test:
+    - uv run tox

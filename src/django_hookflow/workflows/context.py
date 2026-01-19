@@ -123,6 +123,7 @@ class StepManager:
         method: str = "GET",
         body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        verify: bool | None = None,
     ) -> Any:
         """
         Make an external HTTP call as a durable step.
@@ -136,11 +137,13 @@ class StepManager:
             method: HTTP method (GET, POST, etc.)
             body: Optional request body for POST/PUT requests
             headers: Optional additional headers
+            verify: Override SSL verification for this call
 
         Returns:
             The HTTP response data
         """
         import requests
+        from django.conf import settings
 
         # Check if call already completed
         if step_id in self._completed_steps:
@@ -148,12 +151,25 @@ class StepManager:
 
         # Execute the HTTP call
         try:
+            verify_setting = getattr(
+                settings,
+                "DJANGO_HOOKFLOW_VERIFY_SSL",
+                True,
+            )
+            if verify is None:
+                verify_value = verify_setting
+            elif verify_setting:
+                verify_value = verify
+            else:
+                verify_value = True
+
             response = requests.request(
                 method=method,
                 url=url,
                 json=body,
                 headers=headers,
                 timeout=30,
+                verify=verify_value,
             )
             response.raise_for_status()
             result = {

@@ -11,19 +11,24 @@ from django_hookflow.exceptions import WorkflowError
 from django_hookflow.workflows.handlers import publish_next_step
 from django_hookflow.workflows.handlers import verify_qstash_signature
 
+_BASE64_TOKEN = "c2lnbmVkLWtleS0x"
+
 
 class TestVerifyQstashSignature(unittest.TestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
+    @patch("django_hookflow.qstash.receiver.settings")
     @patch("django_hookflow.qstash.receiver.QStashReceiver")
     def test_successful_verification_with_valid_signature(
-        self, mock_receiver_class
+        self, mock_receiver_class, mock_settings
     ):
         """Test successful signature verification with valid signature."""
         mock_receiver = MagicMock()
         mock_receiver.verify.return_value = {"iss": "Upstash"}
         mock_receiver_class.return_value = mock_receiver
+        mock_settings.QSTASH_CURRENT_SIGNING_KEY = _BASE64_TOKEN
+        mock_settings.QSTASH_NEXT_SIGNING_KEY = _BASE64_TOKEN
 
         request = self.factory.post(
             "/hookflow/workflow/test/",
@@ -38,14 +43,17 @@ class TestVerifyQstashSignature(unittest.TestCase):
         mock_receiver_class.assert_called_once()
         mock_receiver.verify.assert_called_once()
 
+    @patch("django_hookflow.qstash.receiver.settings")
     @patch("django_hookflow.qstash.receiver.QStashReceiver")
     def test_failed_verification_raises_workflow_error(
-        self, mock_receiver_class
+        self, mock_receiver_class, mock_settings
     ):
         """Test that failed verification raises WorkflowError."""
         mock_receiver = MagicMock()
         mock_receiver.verify.side_effect = WorkflowError("Invalid signature")
         mock_receiver_class.return_value = mock_receiver
+        mock_settings.QSTASH_CURRENT_SIGNING_KEY = _BASE64_TOKEN
+        mock_settings.QSTASH_NEXT_SIGNING_KEY = _BASE64_TOKEN
 
         request = self.factory.post(
             "/hookflow/workflow/test/",

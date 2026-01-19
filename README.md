@@ -10,10 +10,24 @@ Build multi-step workflows that survive server restarts, network failures, and d
 pip install django-hookflow
 ```
 
+Optional extras:
+
+```bash
+pip install "django-hookflow[ratelimit]"
+pip install "django-hookflow[all]"
+```
+
 or with uv:
 
 ```bash
 uv add django-hookflow
+```
+
+Optional extras:
+
+```bash
+uv add "django-hookflow[ratelimit]"
+uv add "django-hookflow[all]"
 ```
 
 **Requirements:**
@@ -45,7 +59,7 @@ DJANGO_HOOKFLOW_DOMAIN = "https://your-app.com"
 # Optional: Custom webhook path (default: /hookflow/)
 DJANGO_HOOKFLOW_WEBHOOK_PATH = "/hookflow/"
 
-# Optional: Enable database persistence for durability (recommended for production)
+# Optional: Enable or disable database persistence (enabled by default)
 DJANGO_HOOKFLOW_PERSISTENCE_ENABLED = True
 ```
 
@@ -145,7 +159,11 @@ print(f"Started workflow with run_id: {run_id}")
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `DJANGO_HOOKFLOW_WEBHOOK_PATH` | `"/hookflow/"` | Base path for webhook endpoints |
-| `DJANGO_HOOKFLOW_PERSISTENCE_ENABLED` | `False` | Enable database persistence |
+| `DJANGO_HOOKFLOW_PERSISTENCE_ENABLED` | `True` | Enable database persistence |
+| `DJANGO_HOOKFLOW_VERIFY_SSL` | `True` | Verify SSL certificates for HTTP steps |
+| `DJANGO_HOOKFLOW_RATE_LIMIT` | `"100/minute"` | Rate limit for webhook requests |
+| `DJANGO_HOOKFLOW_MAX_PAYLOAD_SIZE` | `1048576` | Max payload size in bytes |
+| `DJANGO_HOOKFLOW_VALIDATE_CONNECTIVITY` | `False` | Check QStash connectivity on startup |
 
 ### Environment Variables Example
 
@@ -541,6 +559,20 @@ By default, QStash retries failed deliveries. Django Hookflow includes logic to 
 - **Non-retryable**: `ValueError`, `TypeError`, `KeyError`, "not found" errors
 
 Failed workflows that exhaust retries are added to the Dead Letter Queue for manual review.
+
+### QStash Built-in Reliability
+
+QStash (Upstash's message queue) provides several built-in reliability features that django-hookflow leverages:
+
+- **Automatic Retries**: QStash automatically retries webhook delivery with exponential backoff (up to 5 retries by default)
+- **At-Least-Once Delivery**: Messages are guaranteed to be delivered at least once
+- **Deduplication**: Use `deduplication_id` to prevent duplicate processing within a time window
+- **Dead Letter Queue**: Failed messages are automatically moved to QStash's DLQ for inspection
+- **High Availability**: QStash is a managed service with built-in redundancy
+
+Because QStash handles retry and failure detection at the infrastructure level, django-hookflow doesn't implement client-side patterns like circuit breakers. If QStash is temporarily unreachable, the publish call will fail immediately, and you can handle it in your application code (e.g., queue locally for retry, return an error to the user, etc.).
+
+For more details, see the [QStash documentation](https://upstash.com/docs/qstash/features/retry).
 
 ### Dead Letter Queue
 

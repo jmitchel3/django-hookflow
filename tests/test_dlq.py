@@ -39,6 +39,22 @@ class TestDeadLetterEntryModel(TestCase):
         self.assertIsNone(entry.replayed_at)
         self.assertIsNotNone(entry.created_at)
 
+    def test_add_entry_redacts_sensitive_traceback(self):
+        entry = DeadLetterEntry.add_entry(
+            workflow_id="test-workflow",
+            run_id="test-run-secret",
+            payload={"data": {}},
+            error_message="Something went wrong",
+            error_traceback=(
+                "Traceback... token=abc123 password=secret api_key=sk_test_123"
+            ),
+        )
+
+        self.assertNotIn("abc123", entry.error_traceback)
+        self.assertNotIn("secret", entry.error_traceback)
+        self.assertNotIn("sk_test_123", entry.error_traceback)
+        self.assertIn("<redacted>", entry.error_traceback)
+
     def test_add_entry_with_minimal_params(self):
         entry = DeadLetterEntry.add_entry(
             workflow_id="test-workflow",

@@ -27,14 +27,14 @@ def latest_patch(versions: list[str], major: int, minor: int) -> str:
     return f"{major}.{minor}.{best_patch}"
 
 
-def load_constraints(path: Path) -> list[tuple[str, str]]:
-    constraints: list[tuple[str, str]] = []
+def load_constraints(path: Path) -> dict[str, str]:
+    constraints: dict[str, str] = {}
     for line in path.read_text().splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         key, constraint = stripped.split("=", 1)
-        constraints.append((key.strip(), constraint.strip()))
+        constraints[key.strip()] = constraint.strip()
     return constraints
 
 
@@ -43,9 +43,9 @@ def update_constraints() -> None:
         data = json.load(response)
 
     versions = list(data["releases"].keys())
-    updated_constraints = []
+    updated_constraints: dict[str, str] = {}
 
-    for key, constraint in load_constraints(CONSTRAINTS_PATH):
+    for key, constraint in load_constraints(CONSTRAINTS_PATH).items():
         major = int(key[0])
         minor = int(key[1:])
         latest = latest_patch(versions, major, minor)
@@ -53,11 +53,11 @@ def update_constraints() -> None:
         if not match:
             raise ValueError(f"Unsupported constraint format: {constraint}")
         upper_bound = match.group(1)
-        updated_constraints.append((key, f"Django>={latest},{upper_bound}"))
+        updated_constraints[key] = f"Django>={latest},{upper_bound}"
 
     lines = ["# Format: key=Django>=min_version,<max_version"]
-    for key, constraint in updated_constraints:
-        lines.append(f"{key}={constraint}")
+    for key in sorted(updated_constraints, key=int):
+        lines.append(f"{key}={updated_constraints[key]}")
 
     CONSTRAINTS_PATH.write_text("\n".join(lines) + "\n")
 

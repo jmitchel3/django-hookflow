@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 from django.test import RequestFactory
+from django.test import override_settings
 
 from django_hookflow import workflow
 from django_hookflow.exceptions import StepCompleted
@@ -16,6 +17,7 @@ from django_hookflow.workflows import get_workflow
 from django_hookflow.workflows.context import WorkflowContext as ContextClass
 from django_hookflow.workflows.registry import _workflow_registry
 from django_hookflow.workflows.registry import generate_workflow_id
+from django_hookflow.workflows.views import workflow_webhook_raw
 
 
 class TestWorkflowRegistry(unittest.TestCase):
@@ -259,11 +261,10 @@ class TestWorkflowView(unittest.TestCase):
         _workflow_registry.clear()
         self.factory = RequestFactory()
 
+    @override_settings(DJANGO_HOOKFLOW_RATE_LIMIT=None)
     @patch("django_hookflow.workflows.views.verify_qstash_signature")
     @patch("django_hookflow.workflows.views.publish_next_step")
     def test_webhook_handles_step_completion(self, mock_publish, mock_verify):
-        from django_hookflow.workflows.views import workflow_webhook
-
         mock_verify.return_value = True
 
         @workflow(workflow_id="test-workflow")
@@ -284,17 +285,16 @@ class TestWorkflowView(unittest.TestCase):
             content_type="application/json",
         )
 
-        response = workflow_webhook(request, "test-workflow")
+        response = workflow_webhook_raw(request, workflow_id="test-workflow")
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
         self.assertEqual(response_data["status"], "step_completed")
         mock_publish.assert_called_once()
 
+    @override_settings(DJANGO_HOOKFLOW_RATE_LIMIT=None)
     @patch("django_hookflow.workflows.views.verify_qstash_signature")
     def test_webhook_handles_workflow_completion(self, mock_verify):
-        from django_hookflow.workflows.views import workflow_webhook
-
         mock_verify.return_value = True
 
         @workflow(workflow_id="complete-workflow")
@@ -314,17 +314,18 @@ class TestWorkflowView(unittest.TestCase):
             content_type="application/json",
         )
 
-        response = workflow_webhook(request, "complete-workflow")
+        response = workflow_webhook_raw(
+            request, workflow_id="complete-workflow"
+        )
 
         self.assertEqual(response.status_code, 200)
         response_data = json.loads(response.content)
         self.assertEqual(response_data["status"], "completed")
         self.assertEqual(response_data["result"], "final_result")
 
+    @override_settings(DJANGO_HOOKFLOW_RATE_LIMIT=None)
     @patch("django_hookflow.workflows.views.verify_qstash_signature")
     def test_webhook_returns_404_for_unknown_workflow(self, mock_verify):
-        from django_hookflow.workflows.views import workflow_webhook
-
         mock_verify.return_value = True
 
         payload = {
@@ -340,7 +341,9 @@ class TestWorkflowView(unittest.TestCase):
             content_type="application/json",
         )
 
-        response = workflow_webhook(request, "unknown-workflow")
+        response = workflow_webhook_raw(
+            request, workflow_id="unknown-workflow"
+        )
 
         self.assertEqual(response.status_code, 404)
 

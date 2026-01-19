@@ -1,10 +1,26 @@
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
 from django.db import models
 from django.utils import timezone
+
+_SENSITIVE_PATTERNS = [
+    re.compile(r"(?i)api[_-]?key\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)token\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)password\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)secret\s*[:=]\s*[^\s,;]+"),
+    re.compile(r"(?i)authorization\s*[:=]\s*[^\s,;]+"),
+]
+
+
+def _sanitize_traceback(traceback_text: str) -> str:
+    sanitized = traceback_text
+    for pattern in _SENSITIVE_PATTERNS:
+        sanitized = pattern.sub("<redacted>", sanitized)
+    return sanitized
 
 
 class DeadLetterEntry(models.Model):
@@ -76,6 +92,8 @@ class DeadLetterEntry(models.Model):
         if completed_steps is None:
             completed_steps = {}
 
+        sanitized_traceback = _sanitize_traceback(error_traceback)
+
         return cls.objects.create(
             workflow_id=workflow_id,
             run_id=run_id,
@@ -83,7 +101,7 @@ class DeadLetterEntry(models.Model):
             payload=payload,
             completed_steps=completed_steps,
             error_message=error_message,
-            error_traceback=error_traceback,
+            error_traceback=sanitized_traceback,
             attempt_count=attempt_count,
         )
 

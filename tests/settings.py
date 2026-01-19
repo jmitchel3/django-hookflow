@@ -18,10 +18,11 @@ DATABASES = {
 USE_TZ = True
 
 # QStash settings for workflow tests
-QSTASH_TOKEN = "test-qstash-token"
-QSTASH_CURRENT_SIGNING_KEY = "test-current-signing-key"
-QSTASH_NEXT_SIGNING_KEY = "test-next-signing-key"
+QSTASH_TOKEN = "qstash_test_token"
+QSTASH_CURRENT_SIGNING_KEY = "c2lnbmVkLWtleS0x"
+QSTASH_NEXT_SIGNING_KEY = "c2lnbmVkLWtleS0y"
 
 # django-hookflow settings
 DJANGO_HOOKFLOW_DOMAIN = "https://example.com"
 DJANGO_HOOKFLOW_WEBHOOK_PATH = "/hookflow/"
+DJANGO_HOOKFLOW_PERSISTENCE_ENABLED = False
